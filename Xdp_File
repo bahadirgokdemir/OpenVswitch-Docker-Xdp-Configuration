@@ -1,0 +1,106 @@
+#include <linux/bpf.h>
+#include <linux/if_ether.h>
+#include <linux/ip.h>
+#include <linux/in.h>
+#include <linux/tcp.h>
+
+#include <bpf/bpf_endian.h>
+#include <bpf/bpf_helpers.h>
+
+#define KEYWORD_LEN 3
+
+SEC("xdp_drop")
+int xdp_program(struct xdp_md *ctx)
+{
+    void *data_end = (void *)(long)ctx->data_end;
+    void *data = (void *)(long)ctx->data;
+
+    struct ethhdr *eth = data;
+    if (eth + 1 > (struct ethhdr *)data_end)
+    {
+     	bpf_printk("Invalid ETHERNET header\n");
+        return XDP_DROP;
+    }
+
+    struct iphdr *iph = (data + sizeof(struct ethhdr));
+    if (iph + 1 > (struct iphdr *)data_end)
+    {
+     	bpf_printk("Invalid IP header\n");
+        return XDP_DROP;
+    }
+
+    if (iph->protocol == IPPROTO_TCP)
+    {
+     	struct tcphdr *tcph = (data + sizeof(struct ethhdr) + sizeof(struct iphdr));
+        if (tcph + 1 > (struct tcphdr *)data_end)
+        {
+            bpf_printk("Invalid TCP header\n");
+            return XDP_DROP;
+        }
+        
+         if (iph->protocol == IPPROTO_TCP)
+    {
+     	struct tcphdr *tcph = (data + sizeof(struct ethhdr) + sizeof(struct iphdr));
+        if (tcph + 1 > (struct tcphdr *)data_end)
+        {
+            bpf_printk("Invalid TCP header\n");
+            return XDP_DROP;
+        }
+
+	if (tcph->dest == bpf_htons(80))
+        {
+
+            char *payload = (char *)((unsigned char *)tcph + (tcph->doff << 2));
+
+            const char *keyword = "hop";
+
+            int payload_len = (void *)data_end - (void *)payload;
+            
+            if (payload_len >= KEYWORD_LEN)
+            {
+             	int i = 0;
+                while (i <= 150)
+                {
+                    if (i > payload_len - KEYWORD_LEN)
+                        break;
+
+                    int match = 1;
+                    int j = 0;
+
+                    for (j = 0; j < KEYWORD_LEN; j++)
+                    {
+                     	char *hop = payload + i + j;
+
+                        bpf_printk("%s : %d\n", hop, i);
+                        bpf_printk("%c : %d    status: %d\n", keyword[j], j, match);
+
+                        if ((void *)hop >= data_end)
+                        {
+                            bpf_printk("Out of bounds");
+                            break;
+                        }
+
+                        if (*hop != keyword[j])
+                        {
+                            match = 0;
+                            break;
+                        }
+                    }
+
+                    if (match)
+                    {
+                     	bpf_printk("Keyword matched: hop\n");
+                        return XDP_DROP;
+                    }
+
+                    i++;
+                }
+            }
+	}
+    }
+
+    bpf_printk("PASS");
+    return XDP_PASS;
+}
+
+
